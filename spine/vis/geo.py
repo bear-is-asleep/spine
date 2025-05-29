@@ -218,8 +218,8 @@ class GeoDrawer:
 
         return traces
 
-    def crt_traces(self, meta=None, detector_coords=True, shared_legend=True,
-                   name='CRT', color='rgba(0,255,0,0.25)', **kwargs):
+    def crt_traces(self, meta=None, shared_legend=True,
+                   name='CRT', color='rgba(0,255,0,0.25)', opacity=1.0, total_pe=None, color_attr=None, opacity_attr=None, **kwargs):
         """Function which produces a list of traces which represent the optical
         detectors in a 3D event display.
 
@@ -227,8 +227,6 @@ class GeoDrawer:
         ----------
         meta : Meta, optional
             Metadata information (only needed if pixel_coordinates is True)
-        detector_coords : bool, default False
-            If False, the coordinates are converted to pixel indices
         shared_legend : bool, default True
             If True, the legend entry in plotly is shared between all the
             detector volumes
@@ -236,6 +234,14 @@ class GeoDrawer:
             Name(s) of the detector volumes
         color : Union[int, str, np.ndarray]
             Color of CRT detectors or list of color of CRT detectors
+        total_pe : Union[float, np.ndarray], optional
+            Total PE of the CRT detectors
+        opacity : Union[float, np.ndarray], default 1.0
+            Opacity of the CRT detectors
+        color_attr : str, optional
+            Name of the attribute to use to determine the color
+        opacity_attr : str, optional
+            Name of the attribute to use to determine the opacity
         **kwargs : dict, optional
             List of additional arguments to pass to
             spine.vis.ellipsoid.ellipsoid_traces or spine.vis.box.box_traces
@@ -263,7 +269,15 @@ class GeoDrawer:
         lower = positions - half_dimensions
         upper = positions + half_dimensions
 
+        # Add hovertext
+        hovertexts = [f'CRT {i}' for i in range(len(positions))]
+        if color_attr is not None:
+            hovertexts = [f'{ht}<br>{color_attr}: {color[i]:.4f}' for i,ht in enumerate(hovertexts)]
+        if total_pe is not None:
+            hovertexts = [f'{ht}<br>Total PE: {total_pe[i]:.4f}' for i,ht in enumerate(hovertexts)]
+        
+
         # Build and return boxes
         return box_traces(
                 lower, upper, shared_legend=shared_legend, name=name,
-                color=color, draw_faces=True, **kwargs)
+                color=color, draw_faces=True, hovertext=hovertexts, opacity=opacity, **kwargs)

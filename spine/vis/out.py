@@ -161,7 +161,7 @@ class Drawer:
 
     def get(self, obj_type, attr=None, color_attr=None, draw_raw=False,
             draw_end_points=False, draw_directions=False, draw_vertices=False,
-            draw_flashes=False, synchronize=False, titles=None,
+            draw_flashes=False, draw_crt=False, crt_opacity_attr='total_pe', crt_color_attr='ts0_ns', synchronize=False, titles=None,
             split_traces=False, matched_flash_only=True):
         """Draw the requested object type with the requested mode.
 
@@ -184,6 +184,12 @@ class Drawer:
             If `True`, draw the interaction vertices
         draw_flashes : bool, default False
             If `True`, draw flashes that have been matched to interactions
+        draw_crt : bool, default False
+            If `True`, draw CRT hits
+        crt_color_attr : str, optional
+            Name of the attribute to use to determine the color of the CRT hits
+        crt_opacity_attr : str, optional
+            Name of the attribute to use to determine the size of the CRT hits
         synchronize : bool, default False
             If `True`, matches the camera position/angle of one plot to the other
         titles : List[str], optional
@@ -252,6 +258,11 @@ class Drawer:
                 assert obj_name in self.data, (
                         "Must provide interactions to draw matched flashes.")
                 traces[prefix] += self._flash_trace(obj_name, matched_flash_only)
+        if draw_crt:
+            assert 'crthits' in self.data, (
+                    "Must provide the `crthits` objects to draw them.")
+            for prefix in self.prefixes:
+                traces[prefix] += self._crt_trace(meta=self.meta, color_attr=crt_color_attr, opacity_attr=crt_opacity_attr)
 
         # Add the TPC traces, if available
         if self.geo_drawer is not None:
@@ -633,6 +644,64 @@ class Drawer:
         return scatter_arrows(
                 points, dirs, hovertext=np.array(hovertext), name=name,
                 color=color, **kwargs)
+    def _crt_trace(self, meta=None, color_attr='ts0_ns', opacity_attr='total_pe', **kwargs):
+        """Draw the CRT hits.
+
+        Parameters
+        ----------
+        meta : Meta, optional
+            Metadata information (only needed if pixel_coordinates is True)
+        color_attr : str, optional
+            Name of the attribute to use to determine the color
+        opacity_attr : str, optional
+            Name of the attribute to use to determine the opacity
+        **kwargs : dict, optional
+            List of additional arguments to pass to :func:`crt_traces`
+        """
+        assert self.geo_drawer is not None, (
+                "Cannot draw CRT hits without geometry information.")
+
+        # Define the name of the trace
+        name = 'CRT hits'
+
+        # Find the color attribute
+        if color_attr is None:
+            color = 'rgba(0,0,0,0.1)' #Black with 10% opacity
+        else:
+            if 'ts' in color_attr:
+                color = np.full(self.geo_drawer.geo.crt.num_detectors, np.inf)
+            else:
+                color = np.zeros(self.geo_drawer.geo.crt.num_detectors)
+            crt_ids = self.geo_drawer.geo.crt.det_ids
+            for hit in self.data['crthits']:
+                index = hit.id
+                # For time, we want to find the closest time to 0 for a hit
+                if 'ts' in color_attr:
+                    if abs(getattr(hit, color_attr)) < abs(color[index]):
+                        color[index] = getattr(hit, color_attr)
+                else:
+                    color[index] += getattr(hit, color_attr)
+            if 'ts' in color_attr: # If time, set the color to 0 for CRTs that are not in the hit
+                color = np.where(color == np.inf, 0, color) 
+
+        if opacity_attr is None:
+            opacity = 1.0
+        else:
+            opacity = np.zeros(self.geo_drawer.geo.crt.num_detectors)
+            for hit in self.data['crthits']:
+                index = hit.id
+                opacity[index] += getattr(hit, opacity_attr)
+        
+            #Scale opacity to be between 0.1 and 1
+            opacity = opacity/np.max(opacity)
+            opacity = opacity*0.9 + 0.1
+        #Get the total PE of the CRT hits
+        total_pe = np.zeros(self.geo_drawer.geo.crt.num_detectors)
+        for hit in self.data['crthits']:
+            index = hit.id
+            total_pe[index] += getattr(hit, 'total_pe')
+        return self.geo_drawer.crt_traces(meta=meta, name=name, color=color, opacity=opacity, color_attr=color_attr, opacity_attr=opacity_attr, total_pe=total_pe, **kwargs)
+        
 
     def _flash_trace(self, obj_name, matched_only, **kwargs):
         """Draw the cumlative PEs of flashes that have been matched to

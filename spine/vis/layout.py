@@ -26,7 +26,7 @@ def layout3d(ranges=None, meta=None, detector=None, titles=None,
              detector_coords=False, backgroundcolor='white',
              gridcolor='lightgray', width=800, height=800, showlegend=True,
              camera=None, aspectmode='manual', aspectratio=None, dark=False,
-             margin=None, hoverlabel=None, **kwargs):
+             margin=None, hoverlabel=None, padding=0.1, **kwargs):
     """Produces plotly.graph_objs.Layout object for a certain format.
 
     Parameters
@@ -69,6 +69,8 @@ def layout3d(ranges=None, meta=None, detector=None, titles=None,
         Specifies the margin in each subplot
     hoverlabel : dict, optional
         Specifies the style hovertext labels
+    padding : float, default 0.1
+        Padding around the plot region
     **kwargs : dict, optional
         List of additional arguments to pass to plotly.graph_objs.Layout
 
@@ -101,9 +103,8 @@ def layout3d(ranges=None, meta=None, detector=None, titles=None,
         ranges = geo.tpc.boundaries
 
         # Add some padding
-        ranges[:, 0] -= lengths*0.1
-        ranges[:, 1] += lengths*0.1
-
+        ranges[:, 0] -= lengths*padding
+        ranges[:, 1] += lengths*padding
         # If pixel coordinates are requested, use meta to make the conversion
         if detector_coords is False:
             assert meta is not None, (

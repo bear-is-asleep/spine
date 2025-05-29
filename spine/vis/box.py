@@ -135,6 +135,7 @@ def box_trace(lower, upper, draw_faces=False, line=None, linewidth=None,
 def box_traces(lowers, uppers, draw_faces=False, color=None, linewidth=None,
                hovertext=None, cmin=None, cmax=None, shared_legend=True,
                legendgroup=None, showlegend=True, group_name=None, name=None,
+               opacity=1.0,
                **kwargs):
     """Function which produces a list of plotly traces of boxes given a list of
     lower bounds and upper bounds in x, y and z.
@@ -165,6 +166,8 @@ def box_traces(lowers, uppers, draw_faces=False, color=None, linewidth=None,
         Whether to show legends on not
     name : str, optional
         Name of the trace(s)
+    opacity : Union[float, np.ndarray], optional
+        Opacity of the boxes
     **kwargs : dict, optional
         List of additional arguments to pass to
         :class:`plotly.graph_objs.Scatter3D` or
@@ -184,6 +187,8 @@ def box_traces(lowers, uppers, draw_faces=False, color=None, linewidth=None,
     assert (hovertext is None or np.isscalar(hovertext) or
             len(hovertext) == len(lowers)), (
             "Specify one hovertext for all boxes, or one hovertext per box.")
+    assert opacity is None or np.isscalar(opacity) or len(opacity) == len(lowers), (
+            "Specify one opacity for all boxes, or one opacity per box.")
 
     # If one color is provided per box, give an associated hovertext
     if hovertext is None and color is not None and not np.isscalar(color):
@@ -200,6 +205,13 @@ def box_traces(lowers, uppers, draw_faces=False, color=None, linewidth=None,
     # If the legend is to be shared, make sure there is a common legend group
     if shared_legend and legendgroup is None:
         legendgroup = 'group_' + str(time.time())
+    
+    # If opacity is a scalar, make it an array
+    if np.isscalar(opacity):
+        opacity = np.full(len(lowers), opacity)
+    elif isinstance(opacity, list):
+        assert max(opacity) <= 1.0, "Opacity must be between 0 and 1"
+        assert min(opacity) >= 0.0, "Opacity must be between 0 and 1"
 
     # Loop over the list of box boundaries
     traces = []
@@ -222,7 +234,7 @@ def box_traces(lowers, uppers, draw_faces=False, color=None, linewidth=None,
         traces.append(box_trace(
             lower, upper, draw_faces, linewidth=linewidth, color=col,
             hovertext=hov, cmin=cmin, cmax=cmax, legendgroup=legendgroup,
-            showlegend=showlegend, name=name_i, **kwargs))
+            showlegend=showlegend, name=name_i, opacity=opacity[i], **kwargs))
 
     return traces
 

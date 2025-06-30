@@ -18,6 +18,8 @@ PLOTLY_COLORS_TUPLE = colors.convert_colors_to_same_type(
 PLOTLY_COLORS_WGRAY = ['#808080'] + PLOTLY_COLORS
 HIGH_CONTRAST_COLORS = np.concatenate(
         [colors.qualitative.Dark24, colors.qualitative.Light24])
+HIGH_CONTRAST_COLORS2 = np.concatenate(
+        [colors.qualitative.Light24, colors.qualitative.Dark24])
 
 __all__ = ['layout3d', 'dual_figure3d']
 

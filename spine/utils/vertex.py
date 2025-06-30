@@ -7,7 +7,7 @@ from .globals import TRACK_SHP, INTER_COL, PRINT_COL, VTX_COLS
 
 
 def get_vertex(start_points, end_points, directions, semantics,
-               anchor_vertex=True, touching_threshold=2.0, return_mode=False):
+               anchor_vertex=True, touching_threshold=2.0, return_mode=False, consider_end_points=True):
     """Reconstruct the vertex of an individual interaction.
 
     Parameters
@@ -27,6 +27,8 @@ def get_vertex(start_points, end_points, directions, semantics,
         Maximum distance for two particle points to be considered touching
     return_mode : bool, default False
         If `True`, return the method used to find the vertex
+    consider_end_points : bool, default True
+        If `True`, consider the end points of the particles when finding the vertex
     """
     # If there is no particle: return default values
     if not len(start_points):
@@ -46,8 +48,12 @@ def get_vertex(start_points, end_points, directions, semantics,
     if anchor_vertex:
         # If there is a unique point where >=2 particles meet, pick it. Include
         # track start and end points, to not rely on direction predictions
-        vertices = get_confluence_points(
-                start_points, end_points, touching_threshold)
+        if consider_end_points:
+            vertices = get_confluence_points(
+                    start_points, end_points, touching_threshold)
+        else:
+            print('We are not considering end points')
+            vertices = []
         if len(vertices) == 1:
             if return_mode:
                 return vertices[0], 'confluence_nodir'

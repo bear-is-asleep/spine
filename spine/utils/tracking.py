@@ -5,7 +5,6 @@ from scipy.interpolate import UnivariateSpline
 
 import spine.math as sm
 
-
 def get_track_length(coordinates: nb.float32[:,:],
                      segment_length: nb.float32 = None,
                      point: nb.float32[:] = None,
@@ -191,7 +190,6 @@ def get_track_deposition_gradient(coordinates: nb.float32[:,:],
     valid_index = np.where(seg_dedxs > -1)[0]
     if not len(valid_index):
         return 0., seg_dedxs, seg_rrs, seg_lengths
-
     seg_dedxs = seg_dedxs[valid_index]
     seg_rrs = seg_rrs[valid_index]
 

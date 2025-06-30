@@ -25,7 +25,7 @@ class VertexProcessor(PostBase):
     def __init__(self, include_shapes=(SHOWR_SHP, TRACK_SHP),
                  use_primaries=True, update_primaries=False,
                  anchor_vertex=True, touching_threshold=2.0,
-                 angle_threshold=0.3, run_mode='both',
+                 angle_threshold=0.3, consider_end_points=True, run_mode='both',
                  truth_point_mode='points'):
         """Initialize the vertex finder properties.
 
@@ -45,6 +45,8 @@ class VertexProcessor(PostBase):
         angle_threshold : float, default 0.3 radians
             Maximum angle between the vertex-to-start-point vector and a shower
             direction to consider that a shower originated from the vertex
+        consider_end_points : bool, default True
+            If true, consider track end points to anchor the vertex
         """
         # Initialize the parent class
         super().__init__('interaction', run_mode, truth_point_mode)
@@ -56,7 +58,7 @@ class VertexProcessor(PostBase):
         self.anchor_vertex = anchor_vertex
         self.touching_threshold = touching_threshold
         self.angle_threshold = angle_threshold
-
+        self.consider_end_points = consider_end_points
     def process(self, data):
         """Reconstruct the vertex position for each interaction in one entry.
 
@@ -102,7 +104,9 @@ class VertexProcessor(PostBase):
             # Reconstruct the vertex for this interaction
             vtx, _ = get_vertex(
                 start_points, end_points, directions, shapes,
-                self.anchor_vertex, self.touching_threshold, return_mode=True)
+                self.anchor_vertex, self.touching_threshold,
+                consider_end_points=self.consider_end_points,
+                return_mode=True)
 
             # Assign it to the appropriate interaction attribute
             if not inter.is_truth:

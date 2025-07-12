@@ -17,6 +17,14 @@ from .factories import model_factory
 from .experimental.bayes.calibration import (
         calibrator_factory, calibrator_loss_factory)
 
+try:
+    from spine.utils.mixed_precision import AMPManager, autocast_if_enabled, mixed_precision_forward
+    from spine.utils.mixed_precision import MemoryOptimizer
+    MIXED_PRECISION_AVAILABLE = True
+except ImportError:
+    MIXED_PRECISION_AVAILABLE = False
+    logger.warning("Mixed precision utilities not available. Performance may be suboptimal.")
+
 
 class ModelManager:
     """Groups all relevant functions to construct a model and its loss."""
@@ -26,7 +34,8 @@ class ModelManager:
                  save_step=None, optimizer=None, restore_optimizer=False,
                  lr_scheduler=None, to_numpy=False, time_dependent_loss=False,
                  dtype='float32', distributed=False, rank=None,
-                 detect_anomaly=False, find_unused_parameters=False):
+                 detect_anomaly=False, find_unused_parameters=False,
+                 use_mixed_precision=True, amp_config=None):
         """Process the model configuration.
 
         Parameters
@@ -59,6 +68,10 @@ class ModelManager:
             Whether to attempt to detect a torch anomaly
         find_unused_parameters : bool, default False
             Attempts to detect unused model parameters in the forward pass
+        use_mixed_precision : bool, default True
+            Whether to use automatic mixed precision training
+        amp_config : dict, optional
+            Configuration for automatic mixed precision manager
         """
         # Save parameters
         self.train = train
@@ -69,6 +82,20 @@ class ModelManager:
         self.rank = rank
         self.device = 'cpu' if self.rank is None else f'cuda:{self.rank}'
         self.main_process = rank is None or rank == 0
+        
+        # Initialize mixed precision and memory optimization
+        self.use_mixed_precision = use_mixed_precision and MIXED_PRECISION_AVAILABLE
+        if self.use_mixed_precision:
+            amp_config = amp_config or {}
+            self.amp_manager = AMPManager(enabled=use_mixed_precision, **amp_config)
+        else:
+            self.amp_manager = None
+        
+        # Initialize memory optimizer
+        if MIXED_PRECISION_AVAILABLE:
+            self.memory_optimizer = MemoryOptimizer()
+        else:
+            self.memory_optimizer = None
 
         # Initialize the timers and the configuration dictionary
         self.watch = StopwatchManager()
@@ -483,17 +510,30 @@ class ModelManager:
 
         # If in train mode, record the gradients for backward step
         with torch.set_grad_enabled(self.train):
+            # Use mixed precision if enabled
+            if self.use_mixed_precision and self.amp_manager:
+                with torch.cuda.amp.autocast():
+                    # Apply the model forward
+                    result = self.net(**input_dict)
+                    
+                    # Compute the loss if one is specified, append results
+                    if self.loss_dict:
+                        if not self.time_dependant:
+                            result.update(self.loss_fn(**loss_dict, **result))
+                        else:
+                            result.update(self.loss_fn(
+                                iteration=iteration, **loss_dict, **result))
+            else:
+                # Apply the model forward
+                result = self.net(**input_dict)
 
-            # Apply the model forward
-            result = self.net(**input_dict)
-
-            # Compute the loss if one is specified, append results
-            if self.loss_dict:
-                if not self.time_dependant:
-                    result.update(self.loss_fn(**loss_dict, **result))
-                else:
-                    result.update(self.loss_fn(
-                        iteration=iteration, **loss_dict, **result))
+                # Compute the loss if one is specified, append results
+                if self.loss_dict:
+                    if not self.time_dependant:
+                        result.update(self.loss_fn(**loss_dict, **result))
+                    else:
+                        result.update(self.loss_fn(
+                            iteration=iteration, **loss_dict, **result))
 
         return result
 
@@ -505,11 +545,26 @@ class ModelManager:
         loss : torch.tensor
             Scalar loss value to step the model weights
         """
-        # Run the model backward
-        loss.backward()
+        # Use mixed precision if enabled
+        if self.use_mixed_precision and self.amp_manager:
+            # Scale the loss for mixed precision
+            scaled_loss = self.amp_manager.scale_loss(loss)
+            scaled_loss.backward()
+            
+            # Unscale gradients before clipping (if applicable)
+            self.amp_manager.unscale_gradients(self.optimizer)
+            
+            # Optional: clip gradients here if needed
+            # torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
+            
+            # Update the model weights with scaled gradients
+            self.amp_manager.step(self.optimizer)
+        else:
+            # Run the model backward
+            loss.backward()
 
-        # Step the optimizer
-        self.optimizer.step()
+            # Step the optimizer
+            self.optimizer.step()
 
         # Step the learning rate scheduler
         if self.lr_scheduler is not None:

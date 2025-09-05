@@ -1,11 +1,11 @@
 """Cathode crossing identification + merging module."""
 
 import numpy as np
+from scipy.spatial.distance import cdist
 
 from spine.data import RecoInteraction, TruthInteraction
 
-from spine.math.distance import cdist, farthest_pair
-from scipy.spatial.distance import cdist as scipy_cdist
+from spine.math.distance import farthest_pair
 
 from spine.utils.globals import TRACK_SHP
 from spine.utils.geo import Geometry
@@ -82,7 +82,6 @@ class CathodeCrosserProcessor(PostBase):
             keys['points'] = True
         if run_mode != 'reco':
             keys[truth_point_mode] = True
-        keys['meta'] = True #Needed to find shift in the cathode
         self.update_keys(keys)
 
     def process(self, data):
@@ -93,8 +92,11 @@ class CathodeCrosserProcessor(PostBase):
         data : dict
             Dictionary of data products
         """
-        #Get the drift pixel resolution
-        dx_res = data['meta'].size[0]
+        # Reset all particle/interaction matches, they are broken by merging
+        for obj_key in self.obj_keys:
+            for obj in data[obj_key]:
+                obj.reset_match()
+
         # Loop over particle types
         update_dict = {}
         for part_key in self.particle_keys:
@@ -135,7 +137,7 @@ class CathodeCrosserProcessor(PostBase):
                 if (part.is_cathode_crosser and self.adjust_crossers and
                     len(tpcs) == 2):
                     # Adjust positions
-                    self.adjust_positions(data, i,dx_res)
+                    self.adjust_positions(data, i)
 
             # If we do not want to merge broken crossers, our job here is done
             if not self.merge_crossers:
@@ -159,14 +161,13 @@ class CathodeCrosserProcessor(PostBase):
                     continue
 
                 # Get the cathode position, drift axis and cathode plane axes
-                daxis = self.geo.tpc[modules_i[0]].drift_axis
                 cpos = self.geo.tpc[modules_i[0]].cathode_pos
+                daxis = self.geo.tpc[modules_i[0]].drift_axis
                 caxes = np.array([i for i in range(3) if i != daxis])
 
                 # Store the distance of the particle to the cathode
                 tpc_offset = self.geo.get_min_volume_offset(
                         end_points_i, modules_i[0], tpcs_i[0])[daxis]
-                cdists = end_points_i[:, daxis] - tpc_offset - cpos
 
                 # Loop over other tracks
                 j = i + 1
@@ -191,8 +192,7 @@ class CathodeCrosserProcessor(PostBase):
                     # Check if the two particles stop at roughly the same
                     # position in the plane of the cathode
                     compat = True
-                    dist_mat = scipy_cdist(
-                            end_points_i[:, caxes], end_points_j[:, caxes])
+                    dist_mat = cdist(end_points_i[:, caxes], end_points_j[:, caxes])
                     argmin = np.argmin(dist_mat)
                     pair_i, pair_j = np.unravel_index(argmin, (2, 2))
                     compat &= (
@@ -213,7 +213,7 @@ class CathodeCrosserProcessor(PostBase):
                     # If compatible, merge
                     if compat:
                         # Merge particle and adjust positions
-                        self.adjust_positions(data, ci,dx_res, cj, truth=pi.is_truth)
+                        self.adjust_positions(data, ci, cj, truth=pi.is_truth)
 
                         # Update the candidate list to remove matched particle
                         candidate_ids[j:-1] = candidate_ids[j+1:] - 1
@@ -246,7 +246,7 @@ class CathodeCrosserProcessor(PostBase):
 
         return update_dict
 
-    def adjust_positions(self, data, idx_i,dx_res, idx_j=None, truth=False):
+    def adjust_positions(self, data, idx_i, idx_j=None, truth=False):
         """Given a cathode crosser (either in one or two pieces), apply the
         necessary position offsets to match it at the cathode.
 
@@ -256,8 +256,6 @@ class CathodeCrosserProcessor(PostBase):
             Dictionary of data products
         idx_i : int
             Index of a cathode crosser (or a cathode crosser fragment)
-        dx_res : float
-            Drift pixel resolution [cm]. Offset the drift position by this amount.
         idx_j : int, optional
             Index of a matched cathode crosser fragment
         truth : bool, default False
@@ -274,10 +272,6 @@ class CathodeCrosserProcessor(PostBase):
         points_key = 'points' if not truth else self.truth_point_key
         particles = data[part_key]
         if idx_j is not None:
-            # Unmatch the particles from their interactions
-            particles[idx_i].unmatch()
-            particles[idx_j].unmatch()
-
             # Merge particles
             int_id_i = particles[idx_i].interaction_id
             int_id_j = particles[idx_j].interaction_id
@@ -310,14 +304,12 @@ class CathodeCrosserProcessor(PostBase):
         int_id = particle.interaction_id
         sisters = [p for p in particles if p.interaction_id == int_id]
 
-        # Get the cathode position
+        # Get the drift axis
         m = modules[0]
         daxis = self.geo.tpc[m].drift_axis
-        cpos = self.geo.tpc[m].cathode_pos
 
         # Loop over contributing TPCs, shift the points in each independently
-        offsets, global_offset = self.get_cathode_offsets(
-                particle, m, tpcs)
+        offsets, global_offset = self.get_cathode_offsets(particle, m, tpcs)
         for i, t in enumerate(tpcs):
             # Move each of the sister particles by the same amount
             for sister in sisters:
@@ -329,18 +321,18 @@ class CathodeCrosserProcessor(PostBase):
                     continue
 
                 # Update the sister position and the main position tensor
-                self.get_points(sister)[tpc_index, daxis] -= offsets[i] + dx_res
-                data[points_key][index, daxis] -= offsets[i] + dx_res
+                self.get_points(sister)[tpc_index, daxis] -= offsets[i]
+                data[points_key][index, daxis] -= offsets[i]
 
                 # Update the start/end points appropriately
                 if sister.id == idx_i:
                     for attr, closest_tpc in closest_tpcs.items():
                         if closest_tpc == t:
-                            getattr(sister, attr)[daxis] -= offsets[i] + dx_res
+                            getattr(sister, attr)[daxis] -= offsets[i]
 
                 else:
-                    sister.start_point[daxis] -= offsets[i] + dx_res
-                    sister.end_point[daxis] -= offsets[i] + dx_res
+                    sister.start_point[daxis] -= offsets[i]
+                    sister.end_point[daxis] -= offsets[i]
 
         # Store crosser information
         particle.is_cathode_crosser = True
@@ -400,10 +392,8 @@ class CathodeCrosserProcessor(PostBase):
         float
             General offset for this particle (proxy of out-of-time displacement)
         """
-        # Get the cathode position
+        # Get the drift axis
         daxis = self.geo.tpc[module].drift_axis
-        cpos = self.geo.tpc[module].cathode_pos
-        dvector = (np.arange(3) == daxis).astype(float)
 
         # Check which side of the cathode each TPC lives
         flip = (-1) ** (
@@ -411,7 +401,7 @@ class CathodeCrosserProcessor(PostBase):
                 > self.geo.tpc[module, tpcs[1]].boundaries[daxis].mean())
 
         # Loop over the contributing TPCs
-        closest_points = np.empty((2, 3))
+        # closest_points = np.empty((2, 3))
         offsets = np.empty(2)
         for i, t in enumerate(tpcs):
             # Get the end points of the track segment
@@ -424,14 +414,17 @@ class CathodeCrosserProcessor(PostBase):
             # Find the point closest to the cathode
             tpc_offset = self.geo.get_min_volume_offset(
                 end_points, module, t)[daxis]
+            cpos = self.geo.tpc[module][t].cathode_pos
             cdists = end_points[:, daxis] - tpc_offset - cpos
             argmin = np.argmin(np.abs(cdists))
-            closest_points[i] = end_points[argmin]
+            # closest_points[i] = end_points[argmin]
 
             # Compute the offset to bring it to the cathode
             offsets[i] = cdists[argmin] + tpc_offset
 
         # Now optimize the offsets based on angular matching
+        # cpos = self.geo.tpc[module].cathode_pos
+        # dvector = (np.arange(3) == daxis).astype(float)
         # xing_point = np.mean(closest_points, axis=0)
         # xing_point[daxis] = cpos
         # for i, t in enumerate(tpcs):
@@ -443,7 +436,10 @@ class CathodeCrosserProcessor(PostBase):
         #     disp = np.dot(dplane, vplane)/np.dot(vplane, vplane)
         #     offsets[i] = [disp, offsets[i]][np.argmin(np.abs([disp, offsets[i]]))]
 
-        # Take the average offset as the value to use
+        # Align the offsets to match the smallest of the two
+        offsets = np.sign(offsets) * np.min(np.abs(offsets))
+
+        # Take the smallest of the two offsets (avoid moving into the cathode)
         global_offset = flip * (offsets[1] - offsets[0])/2.
 
         return offsets, global_offset
